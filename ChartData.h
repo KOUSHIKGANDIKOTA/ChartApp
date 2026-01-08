@@ -15,6 +15,10 @@ class ChartData : public QObject
     Q_PROPERTY(bool normalizePerAxis READ normalizePerAxis WRITE setNormalizePerAxis NOTIFY normalizePerAxisChanged)
     Q_PROPERTY(QVariantList colors READ colors WRITE setColors NOTIFY colorsChanged)
 
+    // NEW: expose per-axis min/max to QML
+    Q_PROPERTY(QVariantList axisMins READ axisMins NOTIFY axisRangesChanged)
+    Q_PROPERTY(QVariantList axisMaxs READ axisMaxs NOTIFY axisRangesChanged)
+
 public:
     explicit ChartData(QObject *parent = nullptr);
 
@@ -27,10 +31,12 @@ public:
     bool normalizePerAxis() const { return m_normalizePerAxis; }
     QVariantList colors() const { return m_colors; }
 
+    QVariantList axisMins() const { return m_axisMins; }
+    QVariantList axisMaxs() const { return m_axisMaxs; }
+
     Q_INVOKABLE void setData(const QVariantList &labels, const QVariantList &datasets);
     Q_INVOKABLE void clearData();
 
-    // File-loading API
     Q_INVOKABLE bool loadCsv(const QString &filePathOrUrl);
     Q_INVOKABLE bool loadTsv(const QString &filePathOrUrl);
     Q_INVOKABLE bool reloadLastCsv();
@@ -53,16 +59,23 @@ signals:
     void normalizePerAxisChanged();
     void colorsChanged();
 
+    // NEW
+    void axisRangesChanged();
+
 private:
     QVariantList m_labels;
     QVariantList m_rawDatasets;
     QVariantList m_datasets;
+
+    QVariantList m_axisMins;
+    QVariantList m_axisMaxs;
+
     QString m_title;
 
     double m_minValue = 0.0;
-    double m_maxValue = 100.0;
+    double m_maxValue = 1.0;
     bool m_autoscale = false;
-    bool m_normalizePerAxis = false;
+    bool m_normalizePerAxis = true;   // DEFAULT ON
 
     QVariantList m_colors;
     QString m_lastCsvPath;
