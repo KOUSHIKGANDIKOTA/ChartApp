@@ -7,9 +7,20 @@ int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
 
+    // Required for FileDialog / QSettings (prevents warnings)
+    QCoreApplication::setOrganizationName("LOGEfuelES");
+    QCoreApplication::setOrganizationDomain("logefueles.com");
+    QCoreApplication::setApplicationName("RadarChartApp");
+
+    // Backend data model
     ChartData chartData;
+
+    // Keep original behavior
     chartData.setTitle("Radar Chart");
-    chartData.setAutoscale(true);
+    chartData.setAutoscale(false);
+
+    // NEW: default normalization ON (as requested)
+    chartData.setNormalizePerAxis(true);
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("ChartData", &chartData);
