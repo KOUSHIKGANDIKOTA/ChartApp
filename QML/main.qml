@@ -6,12 +6,13 @@ import QtQuick.Layouts 1.12
 
 Window {
     id: root
-    width: 1000
+    width: 1200
     height: 820
     visible: true
-    title: "Radar Chart (CSV + TSV + Export PNG)"
+    title: "Radar Chart (CSV + TSV)"
 
-    // CSV dialog
+    // ================= FILE DIALOGS =================
+
     FileDialog {
         id: csvDialog
         title: "Open CSV"
@@ -20,7 +21,6 @@ Window {
         onAccepted: ChartData.loadCsv(fileUrl.toString())
     }
 
-    // TSV dialog
     FileDialog {
         id: tsvDialog
         title: "Open TSV / TXT"
@@ -29,85 +29,28 @@ Window {
         onAccepted: ChartData.loadTsv(fileUrl.toString())
     }
 
-    // Save PNG dialog (uses Save mode)
-    FileDialog {
-        id: saveDialog
-        title: "Save chart as PNG"
-        selectExisting: false
-        folder: StandardPaths.writableLocation(StandardPaths.PicturesLocation)
-        nameFilters: ["PNG Image (*.png)"]
-        onAccepted: {
-            // fileUrl is a file:///... URL; convert to local path and trigger save
-            var localPath = Qt.resolvedUrl(fileUrl).toLocalFile();
-            if (!localPath || localPath.length === 0) {
-                console.log("Invalid save path");
-                return;
-            }
+    // ================= MAIN LAYOUT =================
 
-            // Ensure the chart is painted, then grab image and save
-            if (!chartLoader.item || !chartLoader.item.radarCanvas) {
-                console.log("Chart not ready to export.");
-                return;
-            }
-
-            // Ask Canvas to repaint to ensure up-to-date visual
-            chartLoader.item.radarCanvas.requestPaint();
-
-            // Small delay to give the Canvas time to paint
-            saveWaitTimer.repeat = false;
-            saveWaitTimer.start();
-
-            // Save path is stored for the timer handler
-            savePath = localPath;
-        }
-    }
-
-    property string savePath: ""
-
-    Timer {
-        id: saveWaitTimer
-        interval: 120   // milliseconds (enough for a single repaint; adjust if needed)
-        repeat: false
-        onTriggered: {
-            // Use grabToImage on the Canvas. The GrabResult has saveToFile()
-            var canvas = chartLoader.item.radarCanvas;
-            if (!canvas) {
-                console.log("No canvas to grab");
-                return;
-            }
-            var grabResult = canvas.grabToImage(function(result) {
-                if (!result) {
-                    console.log("Grab failed");
-                    return;
-                }
-                var ok = result.saveToFile(savePath);
-                if (!ok) {
-                    console.log("Failed to save PNG to", savePath);
-                } else {
-                    console.log("Saved chart PNG to", savePath);
-                }
-            });
-            // note: grabToImage uses callback; no need to hold grabResult var
-        }
-    }
-
-    Column {
+    ColumnLayout {
         anchors.fill: parent
         anchors.margins: 12
-        spacing: 12
+        spacing: 10
 
-        Row {
+        // ---------- Controls Row ----------
+        RowLayout {
+            Layout.alignment: Qt.AlignHCenter
             spacing: 10
-            anchors.horizontalCenter: parent.horizontalCenter
 
             Button {
                 text: "Clear Chart"
                 onClicked: ChartData.clearData()
             }
+
             Button {
                 text: "Open CSV..."
                 onClicked: csvDialog.open()
             }
+
             Button {
                 text: "Open TSV..."
                 onClicked: tsvDialog.open()
@@ -115,27 +58,114 @@ Window {
 
             CheckBox {
                 text: "Normalize per-axis"
+                checked: ChartData.normalizePerAxis
                 onCheckedChanged: ChartData.setNormalizePerAxis(checked)
             }
         }
 
+        // ---------- Title ----------
         Text {
             text: ChartData.title
             font.pixelSize: 26
-            anchors.horizontalCenter: parent.horizontalCenter
+            horizontalAlignment: Text.AlignHCenter
+            Layout.fillWidth: true
         }
 
-        Row {
-            spacing: 12
-            anchors.horizontalCenter: parent.horizontalCenter
-            Text { text: "Min: " + ChartData.minValue.toFixed(3) }
-            Text { text: "Max: " + ChartData.maxValue.toFixed(3) }
+        // ---------- Min / Max ----------
+        RowLayout {
+            Layout.alignment: Qt.AlignHCenter
+            spacing: 16
+
+            Text { text: "Global Min: " + ChartData.minValue.toFixed(3) }
+            Text { text: "Global Max: " + ChartData.maxValue.toFixed(3) }
         }
 
-        Loader {
-            id: chartLoader
-            anchors.horizontalCenter: parent.horizontalCenter
-            source: "Chart.qml"
+        // ---------- Chart + Side Panel ----------
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 20
+
+            // ======= Radar Chart =======
+            Loader {
+                id: chartLoader
+                Layout.preferredWidth: 800
+                Layout.fillHeight: true
+                source: "Chart.qml"
+            }
+
+            // ======= Side Info Panel =======
+            Rectangle {
+                Layout.fillHeight: true
+                Layout.preferredWidth: 320
+                color: "#F7F7F7"
+                border.color: "#CCCCCC"
+                radius: 6
+
+                Column {
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 8
+
+                    Text {
+                        text: ChartData.hoverDatasetLabel !== ""
+                              ? "Dataset: " + ChartData.hoverDatasetLabel
+                              : "Hover a region"
+                        font.pixelSize: 18
+                        font.bold: true
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Rectangle {
+                        height: 1
+                        width: parent.width
+                        color: "#CCCCCC"
+                    }
+
+                    // Axis values
+                    Repeater {
+                        model: ChartData.labels.length
+
+                        delegate: Column {
+                            spacing: 2
+
+                            Text {
+                                text: ChartData.labels[index]
+                                font.bold: true
+                            }
+
+                            Text {
+                                text:
+                                    "Raw: " +
+                                    (ChartData.hoverRawValues.length > index
+                                        ? ChartData.hoverRawValues[index].toFixed(3)
+                                        : "-")
+                            }
+
+                            Text {
+                                text:
+                                    "Norm: " +
+                                    (ChartData.hoverNormValues.length > index
+                                        ? ChartData.hoverNormValues[index].toFixed(3)
+                                        : "-")
+                            }
+
+                            Text {
+                                text:
+                                    "Min: " + ChartData.axisMins[index].toFixed(3) +
+                                    "  Max: " + ChartData.axisMaxs[index].toFixed(3)
+                            }
+
+                            Rectangle {
+                                height: 1
+                                width: parent.width
+                                color: "#E0E0E0"
+                                visible: index < ChartData.labels.length - 1
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
