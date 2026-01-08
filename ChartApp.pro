@@ -11,4 +11,3 @@ HEADERS += \
 
 RESOURCES += \
     qml.qrc
-
