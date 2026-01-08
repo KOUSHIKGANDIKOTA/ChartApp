@@ -5,11 +5,11 @@
 #include <QDebug>
 #include <QtMath>
 #include <QUrl>
-#include <QRegExp>
 
 
-//  Utility split functions
-// Split but KEEP empty fields
+// Utility split functions
+
+
 static QStringList splitKeepEmpty(const QString &line, const QChar &delim)
 {
     QStringList parts;
@@ -23,12 +23,10 @@ static QStringList splitKeepEmpty(const QString &line, const QChar &delim)
             start = i + 1;
         }
     }
-
     parts.append(line.mid(start));
     return parts;
 }
 
-// Split and skip empty fields
 static QStringList splitSkipEmpty(const QString &line, const QChar &delim)
 {
     QStringList raw = splitKeepEmpty(line, delim);
@@ -44,39 +42,39 @@ static QStringList splitSkipEmpty(const QString &line, const QChar &delim)
 }
 
 
+// Constructor — dummy dataset
 
-
-// Constructor: initialize dummy example
 
 ChartData::ChartData(QObject *parent) : QObject(parent)
 {
-    // Default dummy labels
     m_labels = {"Eating","Drinking","Sleeping","Coding"};
 
-    QVariantMap ds1; ds1["label"] = "Sample A"; ds1["data"] = QVariantList{65,59,90,81};
-    QVariantMap ds2; ds2["label"] = "Sample B"; ds2["data"] = QVariantList{28,48,40,19};
+    QVariantMap a; a["label"]="Sample A"; a["data"]=QVariantList{65,59,90,81};
+    QVariantMap b; b["label"]="Sample B"; b["data"]=QVariantList{28,48,40,19};
 
-    m_rawDatasets = {ds1, ds2};
+    m_rawDatasets = {a,b};
     m_datasets    = m_rawDatasets;
 
-    // default colors
     m_colors = {"#4CBAB6", "#C0C0C0", "#F28E2C", "#7FB3D5"};
+
+    // compute per-axis ranges for dummy data
+    setData(m_labels, m_rawDatasets);
 }
 
 
+// Helper: compute per-axis ranges
 
-// Per-axis normalization helper
 
-static QVariantList normalizePerAxisHelper(
+static void computeAxisRanges(
         const QVariantList &labels,
-        const QVariantList &rawDatasets)
+        const QVariantList &rawDatasets,
+        QVariantList &axisMins,
+        QVariantList &axisMaxs)
 {
     int axes = labels.size();
-
     QVector<double> amin(axes,  1e300);
     QVector<double> amax(axes, -1e300);
 
-    // Compute min-max for each axis
     for (const QVariant &vd : rawDatasets)
     {
         QVariantMap map = vd.toMap();
@@ -97,7 +95,7 @@ static QVariantList normalizePerAxisHelper(
         }
     }
 
-    // Fix invalid ranges
+    // fix invalid ranges
     for (int i = 0; i < axes; ++i)
     {
         if (amin[i] > amax[i])
@@ -105,10 +103,31 @@ static QVariantList normalizePerAxisHelper(
             amin[i] = 0;
             amax[i] = 1;
         }
-        if (qFuzzyCompare(amin[i], amax[i]))
+        if (qFuzzyCompare(amin[i], amax[i]))   // avoid division by zero
             amax[i] = amin[i] + 1.0;
     }
 
+    axisMins.clear();
+    axisMaxs.clear();
+
+    for (int i = 0; i < axes; ++i)
+    {
+        axisMins.append(amin[i]);
+        axisMaxs.append(amax[i]);
+    }
+}
+
+
+// Normalize dataset per axis
+
+
+static QVariantList normalizePerAxisDatasets(
+        const QVariantList &labels,
+        const QVariantList &rawDatasets,
+        const QVariantList &axisMins,
+        const QVariantList &axisMaxs)
+{
+    int axes = labels.size();
     QVariantList out;
 
     for (const QVariant &vd : rawDatasets)
@@ -127,7 +146,10 @@ static QVariantList normalizePerAxisHelper(
                 if (!ok) v = 0;
             }
 
-            double n = (v - amin[i]) / (amax[i] - amin[i]);
+            double minA = axisMins[i].toDouble();
+            double maxA = axisMaxs[i].toDouble();
+
+            double n = (v - minA) / (maxA - minA);
             if (n < 0) n = 0;
             if (n > 1) n = 1;
 
@@ -145,25 +167,31 @@ static QVariantList normalizePerAxisHelper(
 }
 
 
-
-
 // setData (core function)
 
-void ChartData::setData(const QVariantList &labels, const QVariantList &datasets)
+
+void ChartData::setData(const QVariantList &labels,
+                        const QVariantList &datasets)
 {
     m_labels      = labels;
     m_rawDatasets = datasets;
 
+    // compute axis min/max
+    computeAxisRanges(m_labels, m_rawDatasets, m_axisMins, m_axisMaxs);
+    emit axisRangesChanged();
+
     if (m_normalizePerAxis)
     {
-        m_datasets = normalizePerAxisHelper(labels, datasets);
+        m_datasets = normalizePerAxisDatasets(m_labels, m_rawDatasets,
+                                              m_axisMins, m_axisMaxs);
+
         m_minValue = 0;
         m_maxValue = 1;
         emit minMaxChanged();
     }
     else
     {
-        m_datasets = datasets;
+        m_datasets = m_rawDatasets;
 
         if (m_autoscale)
         {
@@ -173,7 +201,6 @@ void ChartData::setData(const QVariantList &labels, const QVariantList &datasets
             for (const QVariant &vd : m_datasets)
             {
                 QVariantList ds = vd.toMap()["data"].toList();
-
                 for (auto v : ds)
                 {
                     bool ok;
@@ -191,6 +218,7 @@ void ChartData::setData(const QVariantList &labels, const QVariantList &datasets
                 mn = 0;
                 mx = 1;
             }
+
             if (qFuzzyCompare(mn, mx))
                 mx = mn + 1.0;
 
@@ -205,35 +233,33 @@ void ChartData::setData(const QVariantList &labels, const QVariantList &datasets
 }
 
 
+// Clear all data
 
-
-// Clear
 
 void ChartData::clearData()
 {
     m_labels.clear();
     m_rawDatasets.clear();
     m_datasets.clear();
+    m_axisMins.clear();
+    m_axisMaxs.clear();
 
     emit labelsChanged();
     emit datasetsChanged();
+    emit axisRangesChanged();
 }
 
+// Generic CSV/TSV Loader
 
-
-
-// Generic loader (CSV or TSV depending on delimiter)
 
 bool ChartData::loadGeneric(const QString &path, QChar delim)
 {
     QFile f(path);
-
     if (!f.exists())
     {
         qWarning() << "File not found:" << path;
         return false;
     }
-
     if (!f.open(QFile::ReadOnly | QFile::Text))
     {
         qWarning() << "Failed to open:" << path;
@@ -242,9 +268,8 @@ bool ChartData::loadGeneric(const QString &path, QChar delim)
 
     QTextStream in(&f);
 
-    //Read header
+    // header
     QString headerLine;
-
     while (!in.atEnd())
     {
         headerLine = in.readLine().trimmed();
@@ -254,7 +279,7 @@ bool ChartData::loadGeneric(const QString &path, QChar delim)
 
     if (headerLine.isEmpty())
     {
-        qWarning() << "Header empty";
+        qWarning() << "Header empty.";
         return false;
     }
 
@@ -265,10 +290,7 @@ bool ChartData::loadGeneric(const QString &path, QChar delim)
     if (!headers.isEmpty())
     {
         QString h0 = headers.first().toLower();
-
-        if (h0.contains("label") ||
-            h0.contains("name") ||
-            h0.contains("case"))
+        if (h0.contains("label") || h0.contains("name") || h0.contains("case"))
         {
             firstColumnIsLabel = true;
             headers.removeFirst();
@@ -281,11 +303,10 @@ bool ChartData::loadGeneric(const QString &path, QChar delim)
 
     QVariantList outDatasets;
 
-    // Read data rows
+    // rows
     while (!in.atEnd())
     {
         QString line = in.readLine();
-
         if (line.trimmed().isEmpty())
             continue;
 
@@ -295,7 +316,7 @@ bool ChartData::loadGeneric(const QString &path, QChar delim)
         QVariantMap dsMap;
         QVariantList vals;
 
-        QString label = QString("Series %1").arg(outDatasets.size() + 1);
+        QString label = QString("Series %1").arg(outDatasets.size()+1);
         int start = 0;
 
         if (firstColumnIsLabel && tokens.size() > 0)
@@ -309,7 +330,6 @@ bool ChartData::loadGeneric(const QString &path, QChar delim)
             bool ok;
             double v = tokens[i].toDouble(&ok);
             if (!ok) v = 0;
-
             vals.append(v);
         }
 
@@ -321,25 +341,24 @@ bool ChartData::loadGeneric(const QString &path, QChar delim)
 
     if (outLabels.isEmpty() || outDatasets.isEmpty())
     {
-        qWarning() << "Parsed no data from file:" << path;
+        qWarning() << "Parsed no data.";
         return false;
     }
 
     m_lastCsvPath = path;
     setData(outLabels, outDatasets);
-
     return true;
 }
 
 
+// CSV Loader
 
 
-// CSV wrapper
 bool ChartData::loadCsv(const QString &filePathOrUrl)
 {
     QString path = filePathOrUrl;
-
     QUrl url(path);
+
     if (url.isValid() && url.scheme().startsWith("file"))
         path = url.toLocalFile();
 
@@ -347,15 +366,14 @@ bool ChartData::loadCsv(const QString &filePathOrUrl)
 }
 
 
+// TSV Loader
 
-
-// TSV wrapper (for Notepad exports)
 
 bool ChartData::loadTsv(const QString &filePathOrUrl)
 {
     QString path = filePathOrUrl;
-
     QUrl url(path);
+
     if (url.isValid() && url.scheme().startsWith("file"))
         path = url.toLocalFile();
 
@@ -363,9 +381,8 @@ bool ChartData::loadTsv(const QString &filePathOrUrl)
 }
 
 
+// Reload last CSV/TSV
 
-
-// Reload last file
 
 bool ChartData::reloadLastCsv()
 {
@@ -374,17 +391,15 @@ bool ChartData::reloadLastCsv()
 
     if (m_lastCsvPath.endsWith(".tsv", Qt::CaseInsensitive) ||
         m_lastCsvPath.endsWith(".txt", Qt::CaseInsensitive))
-    {
         return loadGeneric(m_lastCsvPath, '\t');
-    }
 
     return loadGeneric(m_lastCsvPath, ',');
 }
 
 
+// Toggle normalization
 
 
-// Toggle per-axis normalization
 void ChartData::setNormalizePerAxis(bool v)
 {
     if (m_normalizePerAxis == v)
