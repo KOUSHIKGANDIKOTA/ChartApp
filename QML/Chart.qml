@@ -6,16 +6,26 @@ Item {
     width: 800
     height: 700
 
-    // ================== STATE ==================
+    // ================= STATE =================
     property int hoverDataset: -1
     property int hoverAxis: -1
     property int selectedDataset: -1
     property point mousePos: Qt.point(0,0)
 
-    // ================== TOOLTIP ==================
+    // ================= ZOOM & PAN =================
+    property real zoomFactor: 1.0
+    property real minZoom: 0.4
+    property real maxZoom: 10.0
+
+    property real panX: 0
+    property real panY: 0
+
+    signal datasetSelected(int index)
+
+    // ================= TOOLTIP =================
     Rectangle {
         id: tooltip
-        visible: hoverAxis >= 0
+        visible: hoverAxis >= 0 && hoverDataset >= 0
         color: "#000000"
         radius: 4
         opacity: 0.85
@@ -26,31 +36,19 @@ Item {
 
         Column {
             anchors.margins: 6
-            anchors.fill: parent
             spacing: 2
 
-            Text {
-                color: "black"
-                font.pixelSize: 12
+            Text { color: "black"; font.pixelSize: 12
                 text: ChartData.labels[hoverAxis]
             }
-
-            Text {
-                color: "black"
-                font.pixelSize: 11
-                text: "Norm: " +
+            Text { color: "black"; font.pixelSize: 11
+                text: "Value: " +
                       ChartData.datasets[hoverDataset]["data"][hoverAxis].toFixed(3)
-            }
-
-            Text {
-                color: "black"
-                font.pixelSize: 11
-                text: "Min: 0.000  Max: 1.000"
             }
         }
     }
 
-    // ================== CANVAS ==================
+    // ================= CANVAS =================
     Canvas {
         id: radarCanvas
         anchors.fill: parent
@@ -61,9 +59,11 @@ Item {
             ctx.reset()
             ctx.clearRect(0,0,width,height)
 
-            var cx = width/2
-            var cy = height/2
-            var radius = Math.min(width,height)*0.38
+            var cx = width/2 + panX
+            var cy = height/2 + panY
+
+            var baseRadius = Math.min(width,height)*0.38
+            var radius = baseRadius * zoomFactor
 
             var labels = ChartData.labels
             var datasets = ChartData.datasets
@@ -74,10 +74,9 @@ Item {
 
             var axes = labels.length
 
-            // ===== GRID =====
+            // ---------- GRID ----------
             ctx.strokeStyle = "rgba(200,200,200,0.6)"
             ctx.lineWidth = 1
-
             for (var r=1;r<=4;r++) {
                 ctx.beginPath()
                 for (var a=0;a<axes;a++) {
@@ -92,7 +91,7 @@ Item {
                 ctx.stroke()
             }
 
-            // ===== AXES =====
+            // ---------- AXES ----------
             ctx.font = "12px sans-serif"
             ctx.fillStyle = "#333"
             ctx.textAlign = "center"
@@ -106,18 +105,21 @@ Item {
                            cy + Math.sin(ang)*radius)
                 ctx.stroke()
 
-                ctx.fillText(labels[a],
-                             cx + Math.cos(ang)*(radius+26),
-                             cy + Math.sin(ang)*(radius+26))
+                ctx.fillText(
+                    labels[a],
+                    cx + Math.cos(ang)*(radius+26),
+                    cy + Math.sin(ang)*(radius+26)
+                )
             }
 
-            // ===== DATASETS =====
+            // ---------- DATASETS ----------
             for (var d=0; d<datasets.length; d++) {
                 var vals = datasets[d]["data"]
-                var col = colors[d] || "steelblue"
-
+                var col = colors[d] || "#4C9ED9"
                 var isSelected = (d === selectedDataset)
-                var alpha = isSelected ? 0.40 : 0.20
+
+                var fillAlpha = isSelected ? 0.08 : 0.02
+                var strokeAlpha = isSelected ? 1.0 : 0.5
 
                 ctx.beginPath()
                 for (var i=0;i<axes;i++) {
@@ -129,13 +131,14 @@ Item {
                     else ctx.lineTo(x,y)
                 }
                 ctx.closePath()
-                ctx.fillStyle = colToRGBA(col, alpha)
-                ctx.strokeStyle = col
-                ctx.lineWidth = isSelected ? 3 : 1.5
+
+                ctx.fillStyle = toRGBA(col, fillAlpha)
+                ctx.strokeStyle = toRGBA(col, strokeAlpha)
+                ctx.lineWidth = isSelected ? 3 : 1.2
                 ctx.fill()
                 ctx.stroke()
 
-                // ===== POINTS =====
+                // ---------- POINTS ----------
                 for (var i=0;i<axes;i++) {
                     var ang = 2*Math.PI*(i/axes) - Math.PI/2
                     var rr = vals[i]*radius
@@ -144,33 +147,47 @@ Item {
 
                     ctx.beginPath()
                     ctx.arc(x,y,4,0,Math.PI*2)
-
-                    if (hoverDataset === d && hoverAxis === i)
-                        ctx.fillStyle = "#000000"
-                    else
-                        ctx.fillStyle = col
-
+                    ctx.fillStyle =
+                        (hoverDataset===d && hoverAxis===i) ? "#000" : col
                     ctx.fill()
                 }
             }
         }
 
-        // ================== MOUSE ==================
+        // ================= INPUT =================
         MouseArea {
             anchors.fill: parent
             hoverEnabled: true
 
+            //Mouse-centered zoom
+            onWheel: {
+                var oldZoom = zoomFactor
+                var zoomStep = wheel.angleDelta.y > 0 ? 1.1 : 0.9
+                var newZoom = Math.max(minZoom,
+                                       Math.min(maxZoom, zoomFactor * zoomStep))
+
+                var ratio = newZoom / oldZoom
+                var mx = wheel.x - radarCanvas.width/2 - panX
+                var my = wheel.y - radarCanvas.height/2 - panY
+
+                panX -= mx * (ratio - 1)
+                panY -= my * (ratio - 1)
+
+                zoomFactor = newZoom
+                radarCanvas.requestPaint()
+            }
+
             onPositionChanged: {
                 mousePos = Qt.point(mouse.x, mouse.y)
-
-                var cx = radarCanvas.width/2
-                var cy = radarCanvas.height/2
-                var radius = Math.min(radarCanvas.width, radarCanvas.height)*0.38
-
                 hoverAxis = -1
                 hoverDataset = -1
 
-                // ---- POINT HOVER ONLY ----
+                var cx = radarCanvas.width/2 + panX
+                var cy = radarCanvas.height/2 + panY
+                var radius =
+                    Math.min(radarCanvas.width,
+                             radarCanvas.height)*0.38 * zoomFactor
+
                 for (var d=0; d<ChartData.datasets.length; d++) {
                     var vals = ChartData.datasets[d]["data"]
                     for (var i=0;i<ChartData.labels.length;i++) {
@@ -185,54 +202,27 @@ Item {
                         }
                     }
                 }
-
                 radarCanvas.requestPaint()
             }
 
-            onClicked: {
+            //double-click polygon selection
+            onDoubleClicked: {
                 if (hoverDataset >= 0) {
-                    // SELECT
                     selectedDataset = hoverDataset
-
-                    ChartData.hoverDatasetLabel =
-                        ChartData.datasets[selectedDataset]["label"]
-
-                    ChartData.hoverRawValues =
-                        ChartData.rawDatasets[selectedDataset]["data"]
-
-                    ChartData.hoverNormValues =
-                        ChartData.datasets[selectedDataset]["data"]
+                    root.datasetSelected(selectedDataset)
                 } else {
-                    // DESELECT (click outside)
                     selectedDataset = -1
-                    ChartData.hoverDatasetLabel = ""
-                    ChartData.hoverRawValues = []
-                    ChartData.hoverNormValues = []
+                    root.datasetSelected(-1)
                 }
                 radarCanvas.requestPaint()
             }
-
-            onExited: {
-                hoverAxis = -1
-                hoverDataset = -1
-                radarCanvas.requestPaint()
-            }
         }
+    }
 
-        function colToRGBA(c,a) {
-            if (c[0]==="#") {
-                var r=parseInt(c.substr(1,2),16)
-                var g=parseInt(c.substr(3,2),16)
-                var b=parseInt(c.substr(5,2),16)
-                return "rgba("+r+","+g+","+b+","+a+")"
-            }
-            return c
-        }
-
-        Connections {
-            target: ChartData
-            onDatasetsChanged: radarCanvas.requestPaint()
-            onLabelsChanged: radarCanvas.requestPaint()
-        }
+    function toRGBA(hex, a) {
+        var r=parseInt(hex.substr(1,2),16)
+        var g=parseInt(hex.substr(3,2),16)
+        var b=parseInt(hex.substr(5,2),16)
+        return "rgba("+r+","+g+","+b+","+a+")"
     }
 }
