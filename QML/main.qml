@@ -9,7 +9,7 @@ Window {
     width: 1200
     height: 820
     visible: true
-    title: "Radar Chart (CSV + TSV)"
+    title: "LOGE"
 
     // ================= FILE DIALOGS =================
 
@@ -108,13 +108,16 @@ Window {
                     spacing: 8
 
                     Text {
-                        text: ChartData.hoverDatasetLabel !== ""
-                              ? "Dataset: " + ChartData.hoverDatasetLabel
-                              : "Hover a region"
                         font.pixelSize: 18
                         font.bold: true
-                        wrapMode: Text.WordWrap
+                        text:
+                            chartLoader.item &&
+                            chartLoader.item.hoverDataset >= 0
+                            ? "Dataset: " +
+                              ChartData.datasetLabel(chartLoader.item.hoverDataset)
+                            : "Properties"
                     }
+
 
                     Rectangle {
                         height: 1
